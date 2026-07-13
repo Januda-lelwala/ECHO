@@ -95,6 +95,12 @@ pip install -r requirements.txt
 uvicorn app.main:app --reload
 ```
 
+On Apple Silicon Macs, PyTorch models automatically use the Metal (`mps`)
+backend when it is available. You can override device selection with
+`MODEL_DEVICE=cpu`, `MODEL_DEVICE=mps`, or `MODEL_DEVICE=auto` (the default).
+The backend enables CPU fallback for individual operations that PyTorch does
+not yet implement on MPS.
+
 #### Using Miniconda (alternative)
 ```bash
 # Initialize conda for your shell (Only if you have not used Conda before)

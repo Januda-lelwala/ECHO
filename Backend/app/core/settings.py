@@ -2,6 +2,7 @@ from pydantic_settings import BaseSettings
 
 class Settings(BaseSettings):
     REDIS_URL: str = "redis://localhost:6379/0"
+    MODEL_DEVICE: str = "auto"
     SESSION_COOKIE_NAME: str = "sid"
     SESSION_TTL_SECONDS: int = 24 * 60 * 60
     COOKIE_SECURE: bool = False

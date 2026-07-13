@@ -24,15 +24,16 @@ async def upload_audio_file(file: UploadFile = File(...),model: str = Form(...))
     """
     Upload an audio file and return the file path for processing
     """
-    # Validate file type
-    if not file.content_type or not file.content_type.startswith('audio/'):
-        raise HTTPException(status_code=400, detail="Invalid file type. Only audio files are allowed.")
-    
-    # Validate file extension
     allowed_extensions = ['.wav', '.mp3', '.m4a', '.flac']
     file_extension = Path(file.filename).suffix.lower()
+    content_type = (file.content_type or "").lower()
+    is_audio_content = content_type.startswith('audio/')
+
+    # Accept browser uploads with audio MIME types and CLI uploads that only provide a valid extension.
     if file_extension not in allowed_extensions:
         raise HTTPException(status_code=400, detail=f"Invalid file extension. Allowed: {', '.join(allowed_extensions)}")
+    if content_type and not is_audio_content and content_type != "application/octet-stream":
+        raise HTTPException(status_code=400, detail="Invalid file type. Only audio files are allowed.")
     
     try:
         # Generate unique filename to avoid conflicts
@@ -54,27 +55,6 @@ async def upload_audio_file(file: UploadFile = File(...),model: str = Form(...))
             sample_rate = 0
             file_size = file_path.stat().st_size
         
-
-        
-
-        try:
-            prediction = await run_inference(model, str(file_path))
-            
-        except Exception as e:
-            print("Prediction API failed:", e)
-            prediction = {}
-        
-        # Generate embeddings for the uploaded file
-        try:
-            from app.api.routes.inferences import extract_single_embedding_endpoint
-            embedding_request = {
-                "model": model,
-                "file_path": str(file_path)
-            }
-            embedding_result = await extract_single_embedding_endpoint(embedding_request)
-            print(f"Generated embeddings for {file.filename}")
-        except Exception as e:
-            print(f"Embedding generation failed for {file.filename}:", e)
         return JSONResponse(
             status_code=200,
             content={
@@ -85,7 +65,7 @@ async def upload_audio_file(file: UploadFile = File(...),model: str = Form(...))
                 "duration": duration,
                 "sample_rate": sample_rate,
                 "size": file_size,
-                "prediction": prediction
+                "prediction": None
             }
         )
     

@@ -17,13 +17,16 @@ import numpy as np
 from sklearn.decomposition import PCA
 from sklearn.manifold import TSNE
 import umap
+from app.core.device import get_pipeline_device, get_torch_device, get_torch_dtype
 
 logger = logging.getLogger(__name__)
+MODEL_DEVICE = get_torch_device()
+MODEL_DTYPE = get_torch_dtype(MODEL_DEVICE)
 
 
 def transcribe_whisper(model_id, audio_file, chunk_length_s=30, batch_size=8, return_timestamps=False, return_attention=False):
-    device = 0 if torch.cuda.is_available() else -1
-    torch_dtype = torch.float16 if torch.cuda.is_available() else torch.float32
+    device = get_pipeline_device(MODEL_DEVICE)
+    torch_dtype = MODEL_DTYPE
     # Load audio
     audio, sample_rate = librosa.load(audio_file, sr=16000)
     audio = audio.astype(np.float32)
@@ -34,7 +37,7 @@ def transcribe_whisper(model_id, audio_file, chunk_length_s=30, batch_size=8, re
         processor = WhisperProcessor.from_pretrained(model_id)
         # CRITICAL FIX: Use eager attention to support output_attentions=True
         model = WhisperForConditionalGeneration.from_pretrained(model_id, attn_implementation="eager")
-        model = model.to("cuda:0" if torch.cuda.is_available() else "cpu")
+        model = model.to(MODEL_DEVICE)
         
         # Process audio to input features
         input_features = processor(audio, sampling_rate=sample_rate, return_tensors="pt").input_features
@@ -134,11 +137,11 @@ def transcribe_whisper(model_id, audio_file, chunk_length_s=30, batch_size=8, re
                     # Use the processor that's already defined above
                     
                     # Move to same device
-                    whisper_model = whisper_model.to(device)
+                    whisper_model = whisper_model.to(MODEL_DEVICE)
                     
                     # Process audio using existing processor
                     input_features = processor(audio, sampling_rate=16000, return_tensors="pt").input_features
-                    input_features = input_features.to(device)
+                    input_features = input_features.to(MODEL_DEVICE)
                     
                     # Get encoder outputs with attention
                     logger.info(f"Calling encoder with input shape: {input_features.shape}")
@@ -204,15 +207,15 @@ def transcribe_whisper(model_id, audio_file, chunk_length_s=30, batch_size=8, re
                         # CRITICAL FIX: Use eager attention for output_attentions=True
                         model_for_attention = WhisperModel.from_pretrained(model_id, attn_implementation="eager")
                     
-                    if device and device != "cpu":
-                        model_for_attention = model_for_attention.to(device)
+                    if MODEL_DEVICE.type != "cpu":
+                        model_for_attention = model_for_attention.to(MODEL_DEVICE)
                     
                     # Process audio properly
                     inputs = processor(audio, sampling_rate=sample_rate, return_tensors="pt")
                     input_features = inputs.input_features
                     
-                    if device and device != "cpu":
-                        input_features = input_features.to(device)
+                    if MODEL_DEVICE.type != "cpu":
+                        input_features = input_features.to(MODEL_DEVICE)
                     
                     # Extract attention with proper error handling
                     with torch.no_grad():
@@ -306,16 +309,16 @@ def transcribe_whisper(model_id, audio_file, chunk_length_s=30, batch_size=8, re
         )
     except NotImplementedError as e:
         if "meta tensor" in str(e):
-            # Fallback for meta tensor issue: load on CPU first then move to CUDA
+            # Fallback for meta tensor issues: load on CPU, then move to the accelerator.
             pipe = pipeline(
                 "automatic-speech-recognition",
                 model=model_id,
                 torch_dtype=torch_dtype,
                 device=-1,  # Force CPU first
             )
-            if torch.cuda.is_available():
+            if MODEL_DEVICE.type != "cpu":
                 try:
-                    pipe.model = pipe.model.to("cuda:0")
+                    pipe.model = pipe.model.to(MODEL_DEVICE)
                 except Exception:
                     pass  # Stay on CPU if move fails
         else:
@@ -384,12 +387,21 @@ def predict_emotion_wave2vec_with_attention(audio_path):
 
 
 _EMO_MODEL_ID = "r-f/wav2vec-english-speech-emotion-recognition"
-feature_extractor = Wav2Vec2FeatureExtractor.from_pretrained(_EMO_MODEL_ID)
-emo_model = Wav2Vec2ForSequenceClassification.from_pretrained(_EMO_MODEL_ID)
-emo_device = "cuda:0" if torch.cuda.is_available() else "cpu"
-emo_model = emo_model.to(emo_device)
+_feature_extractor = None
+_emo_model = None
+emo_device = MODEL_DEVICE
+
+
+def get_wav2vec_emotion_models():
+    global _feature_extractor, _emo_model
+    if _feature_extractor is None or _emo_model is None:
+        _feature_extractor = Wav2Vec2FeatureExtractor.from_pretrained(_EMO_MODEL_ID)
+        _emo_model = Wav2Vec2ForSequenceClassification.from_pretrained(_EMO_MODEL_ID)
+        _emo_model = _emo_model.to(emo_device)
+    return _feature_extractor, _emo_model
 
 def predict_emotion_wave2vec(audio_path, return_attention=False):
+    feature_extractor, emo_model = get_wav2vec_emotion_models()
     audio, rate = librosa.load(audio_path, sr=16000)
     inputs = feature_extractor(audio, sampling_rate=rate, return_tensors="pt", padding=True)
 
@@ -802,28 +814,26 @@ _whisper_model_large = None
 def get_whisper_base_models():
     global _whisper_processor_base, _whisper_model_base
     if _whisper_processor_base is None:
-        device = "cuda:0" if torch.cuda.is_available() else "cpu"
         _whisper_processor_base = WhisperProcessor.from_pretrained("openai/whisper-base")
         _whisper_model_base = WhisperModel.from_pretrained("openai/whisper-base")
-        _whisper_model_base = _whisper_model_base.to(device)
+        _whisper_model_base = _whisper_model_base.to(MODEL_DEVICE)
     return _whisper_processor_base, _whisper_model_base
 
 def get_whisper_large_models():
     global _whisper_processor_large, _whisper_model_large
     if _whisper_processor_large is None:
-        device = "cuda:0" if torch.cuda.is_available() else "cpu"
         _whisper_processor_large = WhisperProcessor.from_pretrained("openai/whisper-large-v3")
         try:
             _whisper_model_large = WhisperModel.from_pretrained(
                 "openai/whisper-large-v3",
-                torch_dtype=torch.float16 if torch.cuda.is_available() else torch.float32,
+                torch_dtype=MODEL_DTYPE,
             )
-            _whisper_model_large = _whisper_model_large.to(device)
+            _whisper_model_large = _whisper_model_large.to(MODEL_DEVICE)
         except NotImplementedError as e:
             if "meta tensor" in str(e):
                 # Handle meta tensor issue for embeddings model too
                 _whisper_model_large = WhisperModel.from_pretrained("openai/whisper-large-v3")
-                _whisper_model_large = _whisper_model_large.to(device)
+                _whisper_model_large = _whisper_model_large.to(MODEL_DEVICE)
             else:
                 raise
     return _whisper_processor_large, _whisper_model_large
@@ -885,6 +895,8 @@ def extract_wav2vec2_embeddings(audio_file_path: str) -> np.ndarray:
     # Load audio
     audio, rate = librosa.load(audio_file_path, sr=16000)
     
+    feature_extractor, emo_model = get_wav2vec_emotion_models()
+
     # Use the same feature extractor as emotion model
     inputs = feature_extractor(audio, sampling_rate=rate, return_tensors="pt", padding=True)
     
