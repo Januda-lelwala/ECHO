@@ -46,6 +46,26 @@ def get_session_id(request: Request) -> Optional[str]:
     return getattr(request.state, 'sid', None)
 
 
+def resolve_file_reference(dataset: str, file_reference, session_id: Optional[str]):
+    """Resolve either a dataset filename or an explicitly named upload."""
+    if not isinstance(file_reference, dict):
+        filename = str(file_reference)
+        return filename, resolve_file(dataset, filename, session_id)
+
+    filename = str(file_reference.get("filename", "")).strip()
+    supplied_path = str(file_reference.get("file_path", "")).strip()
+    if not filename or not supplied_path:
+        raise ValueError("Uploaded file references require filename and file_path")
+
+    uploads_root = UPLOAD_DIR.resolve()
+    resolved_path = Path(supplied_path).resolve()
+    if not resolved_path.is_relative_to(uploads_root):
+        raise ValueError("Uploaded file must be inside the uploads directory")
+    if not resolved_path.is_file():
+        raise FileNotFoundError(f"Uploaded file not found: {filename}")
+    return filename, resolved_path
+
+
 MODEL_FUNCTIONS = {
     "whisper-base": transcribe_whisper_base,
     "whisper-large": transcribe_whisper_large,
@@ -98,10 +118,11 @@ async def check_batch_cache(
     cached_results = {}
     missing_files = []
     
-    for filename in files:
+    for file_reference in files:
         try:
-            # Resolve the file path
-            resolved_path = resolve_file(dataset, filename, session_id)
+            filename, resolved_path = resolve_file_reference(
+                dataset, file_reference, session_id
+            )
             
             # Create cache key
             file_content_hash = hashlib.md5(str(resolved_path).encode()).hexdigest()
@@ -836,10 +857,11 @@ async def extract_embeddings_endpoint(
     embeddings_data = []
     embeddings_list = []
     
-    for filename in files:
+    for file_reference in files:
         try:
-            # Resolve the file path
-            resolved_path = resolve_file(dataset, filename, session_id)
+            filename, resolved_path = resolve_file_reference(
+                dataset, file_reference, session_id
+            )
             
             # Create cache key for embeddings
             file_content_hash = hashlib.md5(str(resolved_path).encode()).hexdigest()

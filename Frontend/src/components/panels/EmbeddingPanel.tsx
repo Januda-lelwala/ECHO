@@ -10,7 +10,7 @@ import { Progress } from "@/components/ui/progress";
 import { Tooltip, TooltipContent, TooltipTrigger, TooltipProvider } from "@/components/ui/tooltip";
 import { EmbeddingPlot } from "../visualization/EmbeddingPlot";
 import { ScalarPlot } from "../visualization/ScalarPlot";
-import { useEmbedding } from "../../contexts/EmbeddingContext";
+import { EmbeddingFileReference, useEmbedding } from "../../contexts/EmbeddingContext";
 import { RefreshCw, Eye, Box, Square, BarChart3, HelpCircle } from "lucide-react";
 import { getFeatureExplanation } from "@/lib/audioFeatures";
 import { API_BASE } from "@/lib/api";
@@ -19,6 +19,11 @@ interface EmbeddingPanelProps {
   model?: string;
   dataset?: string;
   availableFiles?: string[];
+  uploadedFiles?: Array<{
+    file_id: string;
+    filename: string;
+    file_path: string;
+  }>;
   selectedFile?: string | null;
   onFileSelect?: (filename: string) => void;
 }
@@ -111,7 +116,7 @@ interface WhisperAnalysis {
   };
 }
 
-export const EmbeddingPanel = ({ model = "whisper-base", dataset = "common-voice", availableFiles = [], selectedFile, onFileSelect }: EmbeddingPanelProps) => {
+export const EmbeddingPanel = ({ model = "whisper-base", dataset = "common-voice", availableFiles = [], uploadedFiles = [], selectedFile, onFileSelect }: EmbeddingPanelProps) => {
   const [reductionMethod, setReductionMethod] = useState("pca");
   const [is3D, setIs3D] = useState(false);
   const [selectionMode, setSelectionMode] = useState<'box' | 'lasso'>('box');
@@ -125,6 +130,25 @@ export const EmbeddingPanel = ({ model = "whisper-base", dataset = "common-voice
   const [analysisError, setAnalysisError] = useState<string | null>(null);
   const debounceRef = useRef<NodeJS.Timeout | null>(null);
   const { embeddingData, isLoading, error, fetchEmbeddings, clearEmbeddings } = useEmbedding();
+
+  const getEmbeddingFiles = (): EmbeddingFileReference[] => {
+    if (dataset === 'custom') {
+      return uploadedFiles.map(file => ({
+        filename: file.filename,
+        file_path: file.file_path,
+      }));
+    }
+    return availableFiles;
+  };
+
+  const embeddingFileCount = dataset === 'custom' ? uploadedFiles.length : availableFiles.length;
+
+  const getAnalysisFilenames = (filenames: string[]) => {
+    if (dataset !== 'custom') return filenames;
+    return filenames
+      .map(filename => uploadedFiles.find(file => file.filename === filename)?.file_id)
+      .filter((filename): filename is string => Boolean(filename));
+  };
 
   // Get available analysis types based on model
   const getAvailableAnalysisTypes = () => {
@@ -148,12 +172,18 @@ export const EmbeddingPanel = ({ model = "whisper-base", dataset = "common-voice
 
   // Auto-fetch embeddings when model, dataset, or reduction method changes
   useEffect(() => {
-    if (availableFiles.length > 0 && model && dataset) {
-      const filesToProcess = availableFiles;
+    const filesToProcess = getEmbeddingFiles();
+    clearAnalysisResults();
+    setSelectedByAngle([]);
+    setSelectedPoints2D([]);
+
+    if (filesToProcess.length > 0 && model && dataset) {
       const nComponents = is3D ? 3 : 2;
       fetchEmbeddings(model, dataset, filesToProcess, reductionMethod, nComponents);
+    } else {
+      clearEmbeddings();
     }
-  }, [model, dataset, availableFiles, reductionMethod, fetchEmbeddings]);
+  }, [model, dataset, availableFiles, uploadedFiles, reductionMethod, fetchEmbeddings, clearEmbeddings]);
 
   // Cleanup debounce timer on unmount
   useEffect(() => {
@@ -165,9 +195,8 @@ export const EmbeddingPanel = ({ model = "whisper-base", dataset = "common-voice
   }, []);
 
   const handleFetchEmbeddings = () => {
-    if (availableFiles.length > 0) {
-      // Use entire dataset for better visualization
-      const filesToProcess = availableFiles;
+    const filesToProcess = getEmbeddingFiles();
+    if (filesToProcess.length > 0) {
       const nComponents = is3D ? 3 : 2;
       fetchEmbeddings(model, dataset, filesToProcess, reductionMethod, nComponents);
     }
@@ -181,8 +210,8 @@ export const EmbeddingPanel = ({ model = "whisper-base", dataset = "common-voice
   const handle3DToggle = (checked: boolean) => {
     setIs3D(checked);
     // Re-fetch with new dimensionality using entire dataset
-    if (embeddingData && availableFiles.length > 0) {
-      const filesToProcess = availableFiles;
+    const filesToProcess = getEmbeddingFiles();
+    if (embeddingData && filesToProcess.length > 0) {
       const nComponents = checked ? 3 : 2;
       fetchEmbeddings(model, dataset, filesToProcess, reductionMethod, nComponents);
     }
@@ -273,11 +302,11 @@ export const EmbeddingPanel = ({ model = "whisper-base", dataset = "common-voice
     
     try {
       const requestBody: any = {
-        filenames: filenames,
+        filenames: getAnalysisFilenames(filenames),
         model: model,
       };
 
-      if (dataset) {
+      if (dataset && dataset !== 'custom') {
         requestBody.dataset = dataset;
       }
 
@@ -316,10 +345,10 @@ export const EmbeddingPanel = ({ model = "whisper-base", dataset = "common-voice
     
     try {
       const requestBody: any = {
-        filenames: filenames,
+        filenames: getAnalysisFilenames(filenames),
       };
 
-      if (dataset) {
+      if (dataset && dataset !== 'custom') {
         requestBody.dataset = dataset;
       }
 
@@ -359,11 +388,11 @@ export const EmbeddingPanel = ({ model = "whisper-base", dataset = "common-voice
     
     try {
       const requestBody: any = {
-        filenames: filenames,
+        filenames: getAnalysisFilenames(filenames),
         model: model,
       };
 
-      if (dataset) {
+      if (dataset && dataset !== 'custom') {
         requestBody.dataset = dataset;
       }
 
@@ -449,7 +478,7 @@ export const EmbeddingPanel = ({ model = "whisper-base", dataset = "common-voice
                       size="sm"
                       variant="secondary"
                       onClick={handleFetchEmbeddings}
-                      disabled={isLoading || availableFiles.length === 0}
+                      disabled={isLoading || embeddingFileCount === 0}
                       className="h-7 w-7 p-0"
                     >
                       <RefreshCw className={`h-3 w-3 ${isLoading ? 'animate-spin text-primary' : ''}`} />
@@ -523,22 +552,22 @@ export const EmbeddingPanel = ({ model = "whisper-base", dataset = "common-voice
             </div>
 
             {/* Status Messages */}
-            {availableFiles.length === 0 && (
+            {embeddingFileCount === 0 && (
               <div className="text-xs text-muted-foreground flex items-center gap-2 p-3 bg-muted/50 rounded-md border border-border">
                 <div className="w-2 h-2 bg-muted-foreground rounded-full"></div>
                 No files available for embedding extraction
               </div>
             )}
-            {availableFiles.length > 0 && !embeddingData && !isLoading && (
+            {embeddingFileCount > 0 && !embeddingData && !isLoading && (
               <div className="text-xs flex items-center gap-2 p-3 bg-primary/5 rounded-sm border border-primary/20">
                 <div className="w-2 h-2 bg-primary rounded-full animate-pulse"></div>
-                Click <RefreshCw className="inline h-3 w-3 mx-1" /> to extract embeddings from all {availableFiles.length} files
+                Click <RefreshCw className="inline h-3 w-3 mx-1" /> to extract embeddings from all {embeddingFileCount} files
               </div>
             )}
             {isLoading && (
               <div className="text-xs text-primary flex items-center gap-2 p-3 bg-primary/5 rounded-sm border border-primary/20">
                 <div className="w-2 h-2 bg-primary rounded-full animate-ping"></div>
-                Processing {availableFiles.length} files... This may take a few moments.
+                Processing {embeddingFileCount} files... This may take a few moments.
               </div>
             )}
             {error && (

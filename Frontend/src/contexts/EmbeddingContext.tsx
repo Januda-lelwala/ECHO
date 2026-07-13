@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useState, useCallback, useEffect } from 'react';
+import React, { createContext, useContext, useState, useCallback, useRef } from 'react';
 import { API_BASE } from '@/lib/api';
 
 export interface EmbeddingPoint {
@@ -30,12 +30,17 @@ interface EmbeddingContextType {
   fetchEmbeddings: (
     model: string,
     dataset: string,
-    files: string[],
+    files: EmbeddingFileReference[],
     reductionMethod?: string,
     nComponents?: number
   ) => Promise<void>;
   clearEmbeddings: () => void;
 }
+
+export type EmbeddingFileReference = string | {
+  filename: string;
+  file_path: string;
+};
 
 const EmbeddingContext = createContext<EmbeddingContextType | undefined>(undefined);
 
@@ -51,11 +56,12 @@ export const EmbeddingProvider: React.FC<{ children: React.ReactNode }> = ({ chi
   const [embeddingData, setEmbeddingData] = useState<EmbeddingData | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const activeRequest = useRef<AbortController | null>(null);
 
   const fetchEmbeddings = useCallback(async (
     model: string,
     dataset: string,
-    files: string[],
+    files: EmbeddingFileReference[],
     reductionMethod: string = 'pca',
     nComponents: number = 3
   ) => {
@@ -64,6 +70,11 @@ export const EmbeddingProvider: React.FC<{ children: React.ReactNode }> = ({ chi
       return;
     }
 
+    activeRequest.current?.abort();
+    const controller = new AbortController();
+    activeRequest.current = controller;
+
+    setEmbeddingData(null);
     setIsLoading(true);
     setError(null);
 
@@ -74,6 +85,7 @@ export const EmbeddingProvider: React.FC<{ children: React.ReactNode }> = ({ chi
           'Content-Type': 'application/json',
         },
         credentials: 'include',
+        signal: controller.signal,
         body: JSON.stringify({
           model,
           dataset,
@@ -88,18 +100,27 @@ export const EmbeddingProvider: React.FC<{ children: React.ReactNode }> = ({ chi
       }
 
       const data = await response.json();
-      setEmbeddingData(data);
+      if (activeRequest.current === controller) {
+        setEmbeddingData(data);
+      }
     } catch (err) {
+      if (err instanceof DOMException && err.name === 'AbortError') return;
       const errorMessage = err instanceof Error ? err.message : 'Failed to fetch embeddings';
-      setError(errorMessage);
+      if (activeRequest.current === controller) setError(errorMessage);
       console.error('Error fetching embeddings:', err);
     } finally {
-      setIsLoading(false);
+      if (activeRequest.current === controller) {
+        activeRequest.current = null;
+        setIsLoading(false);
+      }
     }
   }, []);
 
   const clearEmbeddings = useCallback(() => {
+    activeRequest.current?.abort();
+    activeRequest.current = null;
     setEmbeddingData(null);
+    setIsLoading(false);
     setError(null);
   }, []);
 

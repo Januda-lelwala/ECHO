@@ -1,4 +1,5 @@
 import logging
+import threading
 import torch
 from transformers import (
     pipeline,
@@ -22,11 +23,43 @@ from app.core.device import get_pipeline_device, get_torch_device, get_torch_dty
 logger = logging.getLogger(__name__)
 MODEL_DEVICE = get_torch_device()
 MODEL_DTYPE = get_torch_dtype(MODEL_DEVICE)
+_WHISPER_EXECUTION_LOCK = threading.RLock()
+_WHISPER_PIPELINES = {}
+
+
+def _get_whisper_pipeline(model_id: str):
+    """Create one reusable ASR pipeline per model on a consistent device."""
+    pipe = _WHISPER_PIPELINES.get(model_id)
+    if pipe is not None:
+        return pipe
+
+    pipeline_device = get_pipeline_device(MODEL_DEVICE)
+    try:
+        pipe = pipeline(
+            "automatic-speech-recognition",
+            model=model_id,
+            torch_dtype=MODEL_DTYPE,
+            device=pipeline_device,
+        )
+    except NotImplementedError as exc:
+        if "meta tensor" not in str(exc):
+            raise
+        pipe = pipeline(
+            "automatic-speech-recognition",
+            model=model_id,
+            torch_dtype=MODEL_DTYPE,
+            device=-1,
+        )
+        if MODEL_DEVICE.type != "cpu":
+            pipe.model = pipe.model.to(MODEL_DEVICE)
+            # Transformers uses this field when moving preprocessed inputs.
+            pipe.device = MODEL_DEVICE
+
+    _WHISPER_PIPELINES[model_id] = pipe
+    return pipe
 
 
 def transcribe_whisper(model_id, audio_file, chunk_length_s=30, batch_size=8, return_timestamps=False, return_attention=False):
-    device = get_pipeline_device(MODEL_DEVICE)
-    torch_dtype = MODEL_DTYPE
     # Load audio
     audio, sample_rate = librosa.load(audio_file, sr=16000)
     audio = audio.astype(np.float32)
@@ -299,49 +332,27 @@ def transcribe_whisper(model_id, audio_file, chunk_length_s=30, batch_size=8, re
             
             return result_dict
     
-    # For regular transcription without attention, use pipeline
-    try:
-        pipe = pipeline(
-            "automatic-speech-recognition",
-            model=model_id,
-            torch_dtype=torch_dtype,
-            device=device,
-        )
-    except NotImplementedError as e:
-        if "meta tensor" in str(e):
-            # Fallback for meta tensor issues: load on CPU, then move to the accelerator.
-            pipe = pipeline(
-                "automatic-speech-recognition",
-                model=model_id,
-                torch_dtype=torch_dtype,
-                device=-1,  # Force CPU first
-            )
-            if MODEL_DEVICE.type != "cpu":
-                try:
-                    pipe.model = pipe.model.to(MODEL_DEVICE)
-                except Exception:
-                    pass  # Stay on CPU if move fails
-        else:
-            raise
+    # Reuse a single pipeline and serialize it. Concurrent generation against
+    # separate MPS model instances can mix CPU preprocessing with MPS weights.
     audio, sample_rate = librosa.load(audio_file, sr=16000)
     audio = audio.astype(np.float32)
 
-    if return_timestamps:
-        
-        result = pipe(
-            audio,
-            return_timestamps="word",  # Get word-level timestamps instead of chunk-level
-            chunk_length_s=5,  # Use smaller chunks (5 seconds instead of 30)
-            batch_size=batch_size,
-        )
-    else:
-        # For regular transcription, use original parameters
-        result = pipe(
-            audio,
-            return_timestamps=return_timestamps,
-            chunk_length_s=chunk_length_s,
-            batch_size=batch_size,
-        )
+    with _WHISPER_EXECUTION_LOCK:
+        pipe = _get_whisper_pipeline(model_id)
+        if return_timestamps:
+            result = pipe(
+                audio,
+                return_timestamps="word",
+                chunk_length_s=5,
+                batch_size=batch_size,
+            )
+        else:
+            result = pipe(
+                audio,
+                return_timestamps=return_timestamps,
+                chunk_length_s=chunk_length_s,
+                batch_size=batch_size,
+            )
     
     if return_timestamps:
         return {
@@ -354,21 +365,25 @@ def transcribe_whisper(model_id, audio_file, chunk_length_s=30, batch_size=8, re
 
 def transcribe_whisper_large(audio_file_path):
     model_id = "openai/whisper-large-v3"
-    return transcribe_whisper(model_id, audio_file_path)
+    with _WHISPER_EXECUTION_LOCK:
+        return transcribe_whisper(model_id, audio_file_path)
 
 def transcribe_whisper_base(audio_file_path):
     model_id = "openai/whisper-base"
-    return transcribe_whisper(model_id, audio_file_path)
+    with _WHISPER_EXECUTION_LOCK:
+        return transcribe_whisper(model_id, audio_file_path)
 
 def transcribe_whisper_with_timestamps(audio_file_path, model_size="base"):
     model_id = "openai/whisper-base" if model_size == "base" else "openai/whisper-large-v3"
-    return transcribe_whisper(model_id, audio_file_path, return_timestamps=True)
+    with _WHISPER_EXECUTION_LOCK:
+        return transcribe_whisper(model_id, audio_file_path, return_timestamps=True)
 
 def transcribe_whisper_with_attention(audio_file_path, model_size="base"):
     """Transcribe audio and return attention weights"""
     logger.info(f"transcribe_whisper_with_attention called: file={audio_file_path}, model_size={model_size}")
     model_id = "openai/whisper-base" if model_size == "base" else "openai/whisper-large-v3"
-    result = transcribe_whisper(model_id, audio_file_path, return_attention=True)
+    with _WHISPER_EXECUTION_LOCK:
+        result = transcribe_whisper(model_id, audio_file_path, return_attention=True)
     logger.info(f"transcribe_whisper_with_attention result: has_attention={bool(result.get('attention'))}")
     return result
 

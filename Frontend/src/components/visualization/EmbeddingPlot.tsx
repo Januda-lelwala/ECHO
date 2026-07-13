@@ -46,24 +46,6 @@ const EmbeddingPlotContent = ({ selectedMethod, is3D, onPointSelect, onAngleRang
     }
   }, [is3D]);
 
-  // Generate mock data as fallback
-  const generateMockData = () => {
-    const n = 50;
-    const x = [];
-    const y = [];
-    const colors = [];
-    const text = [];
-    
-    for (let i = 0; i < n; i++) {
-      x.push(Math.random() * 20 - 10);
-      y.push(Math.random() * 20 - 10);
-      colors.push(['neutral', 'happy', 'sad', 'angry'][Math.floor(Math.random() * 4)]);
-      text.push(`Sample ${i + 1}`);
-    }
-    
-    return { x, y, colors, text };
-  };
-
   // Handle point selection
   const handlePointClick = useCallback((event: any) => {
     if (event.points && event.points.length > 0) {
@@ -94,7 +76,7 @@ const EmbeddingPlotContent = ({ selectedMethod, is3D, onPointSelect, onAngleRang
     }
   }, [is3D, onSelectionChange]);
 
-  // Use real embedding data if available, otherwise fall back to mock data
+  // Only plot coordinates returned by the embedding API.
   const getPlotData = () => {
     if (embeddingData && embeddingData.reduced_embeddings && embeddingData.reduced_embeddings.length > 0) {
       const x = embeddingData.reduced_embeddings.map(point => point.coordinates[0]);
@@ -147,13 +129,7 @@ const EmbeddingPlotContent = ({ selectedMethod, is3D, onPointSelect, onAngleRang
       return { x, y, z, colors, text };
     }
     
-    const mockData = generateMockData();
-    if (is3D) {
-      // Generate mock Z coordinates
-      const z = mockData.x.map(() => Math.random() * 20 - 10);
-      return { ...mockData, z };
-    }
-    return mockData;
+    return { x: [], y: [], z: undefined, colors: [], text: [] };
   };
 
   // Create transparent plane surfaces for 3D visualization
@@ -297,6 +273,17 @@ const EmbeddingPlotContent = ({ selectedMethod, is3D, onPointSelect, onAngleRang
         <div className="text-xs text-red-500 text-center">
           <div className="font-medium">⚠️ Error loading embeddings</div>
           <div className="mt-1">{error}</div>
+        </div>
+      </div>
+    );
+  }
+
+  if (!embeddingData?.reduced_embeddings?.length) {
+    return (
+      <div className="h-full flex items-center justify-center p-4">
+        <div className="text-xs text-muted-foreground text-center">
+          <div className="font-medium">No embedding coordinates available</div>
+          <div className="mt-1">Add at least two valid audio files to generate a projection.</div>
         </div>
       </div>
     );

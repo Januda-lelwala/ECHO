@@ -531,8 +531,9 @@ export const MainLayout = () => {
             <Panel defaultSize={25} minSize={20}>
               <EmbeddingPanel
                 model={model}
-                dataset={dataset}
+                dataset={effectiveDataset}
                 availableFiles={availableFiles}
+                uploadedFiles={uploadedFiles}
                 selectedFile={selectedEmbeddingFile}
                 onFileSelect={handleEmbeddingSelection}
               />
