@@ -570,6 +570,12 @@ export const EmbeddingPanel = ({ model = "whisper-base", dataset = "common-voice
                 Processing {embeddingFileCount} files... This may take a few moments.
               </div>
             )}
+            {embeddingData?.projection_note && !isLoading && (
+              <div className="text-xs text-amber-700 flex items-center gap-2 p-3 bg-amber-50 rounded-sm border border-amber-200">
+                <div className="w-2 h-2 bg-amber-500 rounded-full"></div>
+                {embeddingData.projection_note}
+              </div>
+            )}
             {error && (
               <div className="text-xs text-destructive flex items-center gap-2 p-3 bg-destructive/5 rounded-sm border border-destructive/20">
                 <div className="w-2 h-2 bg-destructive rounded-full"></div>

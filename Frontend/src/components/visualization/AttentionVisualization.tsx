@@ -2,7 +2,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Badge } from "@/components/ui/badge";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { API_BASE } from "@/lib/api";
 
 interface AttentionPair {
@@ -32,11 +32,19 @@ interface AttentionVisualizationProps {
 }
 
 export const AttentionVisualization = ({ selectedFile, model, dataset }: AttentionVisualizationProps) => {
-  const [selectedLayer, setSelectedLayer] = useState(6);  // Middle layer for better semantic attention patterns
+  const [selectedLayer, setSelectedLayer] = useState(3);
   const [selectedHead, setSelectedHead] = useState(0);
   const [attentionData, setAttentionData] = useState<any>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const activeRequest = useRef<AbortController | null>(null);
+  const layerCount = model?.includes('large') ? 32 : 6;
+  const headCount = model?.includes('large') ? 20 : 8;
+
+  useEffect(() => {
+    setSelectedLayer(current => current < layerCount ? current : Math.floor(layerCount / 2));
+    setSelectedHead(current => current < headCount ? current : 0);
+  }, [layerCount, headCount]);
 
   const fetchAttentionData = async () => {
     console.log("AttentionVisualization - fetchAttentionData called:", {
@@ -48,11 +56,18 @@ export const AttentionVisualization = ({ selectedFile, model, dataset }: Attenti
 
     if (!selectedFile || !model || !model.includes('whisper')) {
       console.log("AttentionVisualization - Skipping fetch due to conditions");
+      setAttentionData(null);
+      setError(null);
       return;
     }
 
+    activeRequest.current?.abort();
+    const controller = new AbortController();
+    activeRequest.current = controller;
+
     setIsLoading(true);
     setError(null);
+    setAttentionData(null);
 
     try {
       const requestBody: any = {
@@ -71,13 +86,16 @@ export const AttentionVisualization = ({ selectedFile, model, dataset }: Attenti
           throw new Error("Dataset required for dataset file selection");
         }
       } else if (selectedFile?.file_path) {
-        // Check if we have a dataset - if so, this is a dataset file
-        if (dataset) {
-          // This is a dataset file (either custom or standard dataset)
+        const isUploadedFile = dataset === 'custom'
+          || selectedFile.file_path.startsWith('uploads/')
+          || selectedFile.message?.toLowerCase().includes('upload');
+
+        if (isUploadedFile) {
+          requestBody.file_path = selectedFile.file_path;
+        } else if (dataset) {
           requestBody.dataset = dataset;
-          requestBody.dataset_file = selectedFile.file_path;
+          requestBody.dataset_file = selectedFile.filename || selectedFile.file_path;
         } else {
-          // Regular uploaded file
           requestBody.file_path = selectedFile.file_path;
         }
       } else {
@@ -90,6 +108,7 @@ export const AttentionVisualization = ({ selectedFile, model, dataset }: Attenti
           "Content-Type": "application/json",
         },
         credentials: 'include',
+        signal: controller.signal,
         body: JSON.stringify(requestBody),
       });
 
@@ -99,22 +118,37 @@ export const AttentionVisualization = ({ selectedFile, model, dataset }: Attenti
       }
 
       const data = await response.json();
-      setAttentionData(data);
+      if (activeRequest.current === controller) {
+        setAttentionData(data);
+      }
 
     } catch (err: any) {
+      if (err?.name === 'AbortError') return;
       console.error("AttentionVisualization - Error:", err);
-      setError(err.message);
+      if (activeRequest.current === controller) setError(err.message);
     } finally {
-      setIsLoading(false);
+      if (activeRequest.current === controller) {
+        activeRequest.current = null;
+        setIsLoading(false);
+      }
     }
   };
 
   useEffect(() => {
     fetchAttentionData();
+    return () => activeRequest.current?.abort();
   }, [selectedFile, model, dataset, selectedLayer, selectedHead]);
 
   const renderWordPairsMatrix = () => {
-    if (!attentionData?.attention_pairs) return null;
+    if (!Array.isArray(attentionData?.attention_pairs) || attentionData.attention_pairs.length === 0) {
+      return (
+        <Card>
+          <CardContent className="py-8 text-center text-xs text-muted-foreground">
+            {attentionData?.error || 'No word-level attention was produced. Try audio containing clear speech.'}
+          </CardContent>
+        </Card>
+      );
+    }
 
     const pairs = attentionData.attention_pairs as AttentionPair[];
     const words = [...new Set(pairs.map(p => p.from_word))];
@@ -273,7 +307,15 @@ export const AttentionVisualization = ({ selectedFile, model, dataset }: Attenti
   };
 
   const renderTimelineView = () => {
-    if (!attentionData?.timestamp_attention) return null;
+    if (!Array.isArray(attentionData?.timestamp_attention) || attentionData.timestamp_attention.length === 0) {
+      return (
+        <Card>
+          <CardContent className="py-8 text-center text-xs text-muted-foreground">
+            {attentionData?.error || 'No attention timeline was produced for this audio.'}
+          </CardContent>
+        </Card>
+      );
+    }
 
     const timestamps = attentionData.timestamp_attention as TimestampAttention[];
     if (timestamps.length === 0) return null;
@@ -506,7 +548,7 @@ export const AttentionVisualization = ({ selectedFile, model, dataset }: Attenti
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
-                {Array.from({ length: 12 }, (_, i) => (
+                {Array.from({ length: layerCount }, (_, i) => (
                 <SelectItem key={i} value={i.toString()}>Layer {i}</SelectItem>
                 ))}
               </SelectContent>
@@ -520,7 +562,7 @@ export const AttentionVisualization = ({ selectedFile, model, dataset }: Attenti
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
-                  {Array.from({ length: 12 }, (_, i) => (
+                  {Array.from({ length: headCount }, (_, i) => (
                     <SelectItem key={i} value={i.toString()}>Head {i}</SelectItem>
                   ))}
                 </SelectContent>

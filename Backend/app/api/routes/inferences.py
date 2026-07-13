@@ -912,7 +912,13 @@ async def extract_embeddings_endpoint(
     
     # Perform dimensionality reduction if requested
     reduced_embeddings = None
-    if reduction_method and len(embeddings_list) > 1:
+    projection_note = None
+    if reduction_method and len(embeddings_list) == 1:
+        # A single vector has no relative geometry. Place it at the neutral
+        # origin so the UI can still display and select the real embedding.
+        reduced_embeddings = np.zeros((1, n_components), dtype=np.float32)
+        projection_note = "Single embedding placed at origin; add more files for a meaningful projection."
+    elif reduction_method and len(embeddings_list) > 1:
         try:
             reduced_embeddings = await asyncio.to_thread(
                 reduce_dimensions, embeddings_list, reduction_method, n_components
@@ -938,6 +944,9 @@ async def extract_embeddings_endpoint(
         "total_files": len(embeddings_data),
         "original_dimension": embeddings_list[0].shape[0] if embeddings_list else 0
     }
+
+    if projection_note:
+        response["projection_note"] = projection_note
     
     if reduced_embeddings is not None:
         response["reduced_embeddings"] = [

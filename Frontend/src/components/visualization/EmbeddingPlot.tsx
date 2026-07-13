@@ -283,7 +283,7 @@ const EmbeddingPlotContent = ({ selectedMethod, is3D, onPointSelect, onAngleRang
       <div className="h-full flex items-center justify-center p-4">
         <div className="text-xs text-muted-foreground text-center">
           <div className="font-medium">No embedding coordinates available</div>
-          <div className="mt-1">Add at least two valid audio files to generate a projection.</div>
+          <div className="mt-1">Upload a valid audio file to generate an embedding.</div>
         </div>
       </div>
     );

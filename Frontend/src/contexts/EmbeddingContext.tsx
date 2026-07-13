@@ -21,6 +21,7 @@ interface EmbeddingData {
   reduced_embeddings?: EmbeddingPoint[];
   total_files: number;
   original_dimension: number;
+  projection_note?: string;
 }
 
 interface EmbeddingContextType {
