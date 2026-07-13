@@ -554,6 +554,7 @@ export const MainLayout = () => {
                     onPerturbationComplete={handlePerturbationComplete}
                     onPredictionRefresh={handlePredictionRefresh}
                     onPredictionUpdate={handlePredictionUpdate}
+                    predictionMap={predictionMap}
                   />
                 </Panel>
                 

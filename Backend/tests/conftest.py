@@ -11,6 +11,13 @@ from unittest.mock import Mock, patch
 from httpx import AsyncClient
 from fakeredis.aioredis import FakeRedis
 
+# Keep tests deterministic and independent from a developer's production-like .env.
+# These must be set before importing the application and constructing Settings.
+os.environ.setdefault("REDIS_URL", "redis://localhost:6379/15")
+os.environ.setdefault("COOKIE_SECURE", "false")
+os.environ.setdefault("COOKIE_SAMESITE", "lax")
+os.environ.setdefault("ALLOWED_ORIGINS", "http://test")
+
 # Make app importable
 from app.main import app
 from app.core import redis as redis_module

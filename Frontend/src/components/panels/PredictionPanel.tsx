@@ -5,6 +5,7 @@ import { Progress } from "@/components/ui/progress";
 import { SaliencyVisualization } from "../visualization/SaliencyVisualization";
 import { AttentionVisualization } from "../visualization/AttentionVisualization";
 import { PerturbationTools } from "../analysis/PerturbationTools";
+import { FailureDiscoveryPanel } from "../analysis/FailureDiscoveryPanel";
 import { useState, useEffect } from "react";
 import { API_BASE } from '@/lib/api';
 
@@ -61,9 +62,10 @@ interface PredictionPanelProps {
   onPerturbationComplete?: (result: PerturbationResult) => void;
   onPredictionRefresh?: (file: UploadedFile, prediction: string) => void;
   onPredictionUpdate?: (fileId: string, prediction: string) => void;
+  predictionMap?: Record<string, string>;
 }
 
-export const PredictionPanel = ({ selectedFile, selectedEmbeddingFile, model, dataset, originalDataset, onPerturbationComplete, onPredictionRefresh, onPredictionUpdate }: PredictionPanelProps) => {
+export const PredictionPanel = ({ selectedFile, selectedEmbeddingFile, model, dataset, originalDataset, onPerturbationComplete, onPredictionRefresh, onPredictionUpdate, predictionMap = {} }: PredictionPanelProps) => {
   const [wav2vecPrediction, setWav2vecPrediction] = useState<Wav2Vec2Prediction | null>(null);
   const [whisperPrediction, setWhisperPrediction] = useState<WhisperPrediction | null>(null);
   const [isLoading, setIsLoading] = useState(false);
@@ -411,10 +413,11 @@ export const PredictionPanel = ({ selectedFile, selectedEmbeddingFile, model, da
     <div className="h-full bg-panel-background border-t border-border">
       <Tabs defaultValue="saliency" className="h-full">
         <div className="bg-panel-header border-b border-border px-3 py-2">
-          <TabsList className={`h-7 grid w-full ${hasAttention ? 'grid-cols-3' : 'grid-cols-2'} bg-muted`}>
+          <TabsList className={`h-7 grid w-full ${hasAttention ? 'grid-cols-4' : 'grid-cols-3'} bg-muted`}>
             <TabsTrigger value="saliency" className="text-xs">Saliency</TabsTrigger>
             {hasAttention && <TabsTrigger value="attention" className="text-xs">Attention</TabsTrigger>}
             <TabsTrigger value="perturbation" className="text-xs">Perturbation</TabsTrigger>
+            <TabsTrigger value="discovery" className="text-xs">Discover</TabsTrigger>
           </TabsList>
         </div>
 
@@ -450,6 +453,16 @@ export const PredictionPanel = ({ selectedFile, selectedEmbeddingFile, model, da
                 model={model}
                 dataset={dataset}
                 originalDataset={originalDataset}
+              />
+            </div>
+          </TabsContent>
+
+          <TabsContent value="discovery" className="m-0 h-full">
+            <div className="p-3">
+              <FailureDiscoveryPanel
+                model={model}
+                dataset={originalDataset || dataset}
+                predictionMap={predictionMap}
               />
             </div>
           </TabsContent>

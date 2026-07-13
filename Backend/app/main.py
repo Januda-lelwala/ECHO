@@ -1,15 +1,16 @@
-import os
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from .core.session import SessionMiddleware
+from .core.settings import settings
 
 from .api.routes import session as session_routes, results as results_routes, inferences as inferences_routes, upload as upload_routes, health as health_routes
 from .api.routes import datasets as datasets_routes, saliency as saliency_routes, perturbations as perturbations_routes, dataset_management as dataset_management_routes, debug as debug_routes
+from .api.routes import analysis as analysis_routes
 
 app = FastAPI(title="LIT for Voice – API")
 
 # Configure CORS origins - default to common development origins if not set
-allowed_origins_env = os.getenv("ALLOWED_ORIGINS", "")
+allowed_origins_env = settings.ALLOWED_ORIGINS
 if allowed_origins_env:
     origins = [origin.strip() for origin in allowed_origins_env.split(",") if origin.strip()]
 else:
@@ -39,3 +40,4 @@ app.include_router(saliency_routes.router, tags=["Saliency"])
 app.include_router(perturbations_routes.router, tags=["Perturbations"])
 app.include_router(health_routes.router, tags=["Health"])
 app.include_router(debug_routes.router, tags=["Debug"])
+app.include_router(analysis_routes.router, tags=["Analysis"])
