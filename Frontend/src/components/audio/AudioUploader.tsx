@@ -3,7 +3,7 @@ import { useDropzone } from "react-dropzone";
 import { Card, CardContent } from "@/components/ui/card";
 import { Upload, FileAudio } from "lucide-react";
 import { toast } from "sonner";
-import { API_BASE } from '@/lib/api';
+import { API_BASE, readJsonResponse } from '@/lib/api';
 
 interface AudioUploaderProps {
   onUploadSuccess?: (uploadResponse) => void;
@@ -24,12 +24,13 @@ export const AudioUploader = ({ onUploadSuccess, model }: AudioUploaderProps) =>
         body: formData,
       });
 
+      const data = await readJsonResponse<{ detail?: string } & Record<string, unknown>>(response);
+
       if (!response.ok) {
-        const errorData = await response.json();
+        const errorData = data;
         throw new Error(errorData.detail || 'Upload failed');
       }
 
-      const data = await response.json();
       toast.success(`Uploaded: ${file.name}`);
       
       // Call the callback with upload response

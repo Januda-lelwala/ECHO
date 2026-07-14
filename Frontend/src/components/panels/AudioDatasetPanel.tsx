@@ -8,7 +8,7 @@ import { Upload, Search, Play, Pause, RefreshCw, HelpCircle } from "lucide-react
 import { AudioUploader } from "../audio/AudioUploader";
 import { AudioDataTable } from "../audio/AudioDataTable";
 import { toast } from "sonner";
-import { API_BASE } from '@/lib/api';
+import { API_BASE, readJsonResponse } from '@/lib/api';
 
 interface UploadedFile {
   file_id: string;
@@ -515,12 +515,13 @@ export const AudioDatasetPanel = ({
         body: formData,
       });
 
+      const data = await readJsonResponse<{ detail?: string } & Record<string, any>>(response);
+
       if (!response.ok) {
-        const errorData = await response.json();
+        const errorData = data;
         throw new Error(errorData.detail || 'Upload failed');
       }
 
-      const data = await response.json();
       setUploadedFiles(prevFiles => [...prevFiles, data]);
       toast.success(`Uploaded: ${file.name}`);
       
